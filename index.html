@@ -1,0 +1,204 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tile Adventure</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { overflow: hidden; touch-action: manipulation; }
+        #gameCanvas { border: 1px solid black; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100; }
+        .modal-content { background: white; margin: 10% auto; padding: 20px; width: 80%; max-width: 400px; border-radius: 8px; }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center h-screen p-4">
+    <div class="text-center mb-4">
+        <h1 class="text-2xl font-bold">Tile Adventure</h1>
+        <div id="stats" class="text-sm"></div>
+        <div id="inventory" class="text-sm mt-2"></div>
+    </div>
+    <canvas id="gameCanvas" class="max-w-full max-h-[50vh]"></canvas>
+    <div class="flex space-x-2 mt-4">
+        <button id="upBtn" class="bg-blue-500 text-white px-4 py-2 rounded">Up</button>
+        <button id="leftBtn" class="bg-blue-500 text-white px-4 py-2 rounded">Left</button>
+        <button id="rightBtn" class="bg-blue-500 text-white px-4 py-2 rounded">Right</button>
+        <button id="downBtn" class="bg-blue-500 text-white px-4 py-2 rounded">Down</button>
+    </div>
+    <div id="encounterModal" class="modal">
+        <div class="modal-content">
+            <h2 id="encounterTitle" class="text-lg font-bold"></h2>
+            <p id="encounterDesc"></p>
+            <div id="encounterChoices" class="mt-4"></div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const tileSize = 40;
+        const mapSize = 10;
+        const tiles = [];
+        const player = {
+            x: 5, y: 5,
+            stats: { health: 10, strength: 5, speed: 5, charisma: 5, maxHealth: 10 },
+            inventory: [],
+            experience: 0, level: 1
+        };
+        const encounterTypes = [
+            { type: 'combat', desc: 'A wild beast attacks!', stat: 'strength', difficulty: 10 },
+            { type: 'trap', desc: 'You trigger a hidden trap!', stat: 'speed', difficulty: 8 },
+            { type: 'npc', desc: 'A mysterious traveler offers a deal.', stat: 'charisma', difficulty: 7 }
+        ];
+        const items = ['Health Potion', 'Sword', 'Amulet', 'Gold Coin'];
+
+        function init() {
+            canvas.width = mapSize * tileSize;
+            canvas.height = mapSize * tileSize;
+            for (let y = 0; y < mapSize; y++) {
+                tiles[y] = [];
+                for (let x = 0; x < mapSize; x++) {
+                    tiles[y][x] = Math.random() < 0.3 ? 'forest' : 'grass';
+                }
+            }
+            updateStats();
+            drawMap();
+            document.getElementById('upBtn').addEventListener('click', () => movePlayer(0, -1));
+            document.getElementById('leftBtn').addEventListener('click', () => movePlayer(-1, 0));
+            document.getElementById('rightBtn').addEventListener('click', () => movePlayer(1, 0));
+            document.getElementById('downBtn').addEventListener('click', () => movePlayer(0, 1));
+        }
+
+        function drawMap() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let y = 0; y < mapSize; y++) {
+                for (let x = 0; x < mapSize; x++) {
+                    ctx.fillStyle = tiles[y][x] === 'forest' ? 'darkgreen' : 'lightgreen';
+                    ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
+                }
+            }
+            ctx.fillStyle = 'red';
+            ctx.fillRect(player.x * tileSize, player.y * tileSize, tileSize, tileSize);
+        }
+
+        function updateStats() {
+            document.getElementById('stats').innerHTML = `
+                Health: ${player.stats.health}/${player.stats.maxHealth} | 
+                Strength: ${player.stats.strength} | 
+                Speed: ${player.stats.speed} | 
+                Charisma: ${player.stats.charisma} | 
+                Level: ${player.level} (XP: ${player.experience})
+            `;
+            document.getElementById('inventory').innerHTML = `Inventory: ${player.inventory.join(', ') || 'Empty'}`;
+        }
+
+        function movePlayer(dx, dy) {
+            const newX = player.x + dx;
+            const newY = player.y + dy;
+            if (newX >= 0 && newX < mapSize && newY >= 0 && newY < mapSize) {
+                player.x = newX;
+                player.y = newY;
+                drawMap();
+                if (Math.random() < 0.4) triggerEncounter();
+            }
+        }
+
+        function rollD20(stat) {
+            return Math.floor(Math.random() * 20) + 1 + Math.floor(player.stats[stat] / 2);
+        }
+
+        function triggerEncounter() {
+            const encounter = encounterTypes[Math.floor(Math.random() * encounterTypes.length)];
+            const modal = document.getElementById('encounterModal');
+            document.getElementById('encounterTitle').textContent = encounter.type.toUpperCase();
+            document.getElementById('encounterDesc').textContent = encounter.desc;
+            document.getElementById('encounterChoices').innerHTML = `
+                <button onclick="resolveEncounter('${encounter.type}', '${encounter.stat}', ${encounter.difficulty})" 
+                        class="bg-green-500 text-white px-4 py-2 rounded">Attempt (Use ${encounter.stat})</button>
+                <button onclick="closeModal()" class="bg-red-500 text-white px-4 py-2 rounded mt-2">Flee</button>
+            `;
+            modal.style.display = 'block';
+        }
+
+        function resolveEncounter(type, stat, difficulty) {
+            const roll = rollD20(stat);
+            let outcome = '';
+            if (roll >= difficulty) {
+                outcome = `Success! Roll: ${roll} vs ${difficulty}. `;
+                player.experience += 10;
+                if (Math.random() < 0.5) {
+                    const item = items[Math.floor(Math.random() * items.length)];
+                    player.inventory.push(item);
+                    outcome += `You found a ${item}! `;
+                }
+                if (player.experience >= player.level * 20) {
+                    player.level++;
+                    player.stats.maxHealth += 2;
+                    player.stats.health = player.stats.maxHealth;
+                    player.stats.strength++;
+                    player.stats.speed++;
+                    player.stats.charisma++;
+                    outcome += `You leveled up to ${player.level}!`;
+                }
+            } else {
+                outcome = `Failure! Roll: ${roll} vs ${difficulty}. `;
+                player.stats.health -= 2;
+                if (player.stats.health <= 0) {
+                    outcome += 'You died! Game Over.';
+                    setTimeout(() => location.reload(), 2000);
+                }
+            }
+            document.getElementById('encounterDesc').textContent = outcome;
+            document.getElementById('encounterChoices').innerHTML = `
+                <button onclick="closeModal()" class="bg-blue-500 text-white px-4 py-2 rounded">Continue</button>
+            `;
+            updateStats();
+        }
+
+        function closeModal() {
+            document.getElementById('encounterModal').style.display = 'none';
+        }
+
+        init();
+    </script>
+</body>
+</html>
